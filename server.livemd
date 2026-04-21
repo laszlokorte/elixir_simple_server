@@ -1,0 +1,128 @@
+# My favorite Erlang Program by Joe Armstrong in Elixir
+
+```elixir
+Mix.install([
+  {:kino, "~> 0.19.0"}
+])
+```
+
+## Intro
+
+In [this blog post](https://joearms.github.io/published/2013-11-21-My-favorite-erlang-program.html) Joe Armstrong walks through a simple example of Erlang code to demonstrate the power and simplicity of Erlang processes.
+
+This Livebook translates the code to Elixir
+
+## Universal Server
+
+First we define a new module `UniversalServer` with only a single function  called server `server`.
+The function waits for an incoming message, via the `receive` block, and expects this message to be a two-element tuple `{:become, func}` with `func` being a zero-argument function.
+
+As soon as this message containing the function is received, the function will be called, effectively handing the full control of the current process to this function.
+
+```elixir
+defmodule UniversalServer do
+  def server do
+    # wait for an incoming message
+    receive do
+      # expect the message to be of the format {:become func}
+      {:become, func} when is_function(func, 0) ->
+        # call func
+        func.()
+    end
+  end
+end
+```
+
+## Factorial Server
+
+Next we define another module `FactorialServer` with another zero-argument function `server`. This `server` function also uses a `receive` block for waiting for an incoming tuple message.
+This tuple is expected to contain a process id (PID) `from` as first element and an integer as second element.
+
+Uppon receiving such message the factorial of the given integer is calculated and the send to the processed indicated by the `from` address.
+
+```elixir
+defmodule FactorialServer do
+  def server do
+    # wait for an incoming message
+    receive do
+      # expect the message to be of format {pid, int}
+      {from, n} when is_pid(from) and is_integer(n) ->
+        # calculate factorial and send the result back to the from-adress
+        send(from, factorial(n))
+    end
+  end
+
+  def factorial(0), do: 1
+  def factorial(n), do: factorial(n - 1) * n
+end
+```
+
+## Spawing the Server
+
+Now we can spawn a new process and let it calculate the factorial of some number.
+First we spawn the universal server and capture the PID of the new process in a variable.
+This universal server will just idle and wait for our initial message.
+Remember this message is expected to look like `{:become, func}` to tell the server what code to execute.
+
+So next we send such message to the pid, passing the `FactorialServer.server` function as second tuple element. This will cause the `UniversalServer` to run the factorial server function.
+
+The `FactorialServer.server` in turn will wait for the next message, expecting it to be a tuple ` {from, n}`. `from` is the PID of the process that shall receive the resul of the calculation.
+
+So the next message we send is `{self(), 50}`. This instructs the server process to calculate the factorial of 50 and to send the result back to us.
+
+Finally we use a `receive` block to wait for the result to be received and then print it.
+
+```elixir
+# spawn new process running the UniversalServer
+pid = spawn(&UniversalServer.server/0)
+# send the FactorialServer function to be run inside the other process
+send(pid, {:become, &FactorialServer.server/0})
+# send the number 50 to the server for it to calculate the result 
+send(pid, {self(), 50})
+
+# receive the result
+receive do
+  # print it
+  result -> IO.inspect(result)
+end
+
+Kino.nothing()
+```
+
+## Trace Process Communication
+
+We can use `Kino.Process.render_seq_trace` to plot the process communication in a sequence diagram.
+
+```elixir
+Kino.Process.render_seq_trace(
+  :all,
+  fn ->
+    pid = spawn(&UniversalServer.server/0)
+    # spawn new process running the UniversalServer
+    # send the FactorialServer function to be run inside the other process
+    send(pid, {:become, &FactorialServer.server/0})
+    # send the number 50 to the server for it to calculate the result 
+    send(pid, {self(), 5})
+
+    # receive the result
+    receive do
+      # print it
+      result -> IO.inspect(result)
+    end
+  end,
+  caption: "Foo",
+  message_label: fn msg ->
+    case msg do
+      e ->
+        {:ok,
+         inspect(e)
+         |> String.replace("#", "#35;")}
+
+      _ ->
+        :continue
+    end
+  end
+)
+
+Kino.nothing()
+```
