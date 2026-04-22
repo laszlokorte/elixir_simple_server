@@ -24,6 +24,8 @@ As soon as this message containing the function is received, the function will b
 ```elixir
 defmodule UniversalServer do
   def server do
+    # Set Label for debugging
+    Process.set_label(__MODULE__)
     # wait for an incoming message
     receive do
       # expect the message to be of the format {:become func}
@@ -51,6 +53,8 @@ Uppon receiving such message the factorial of the given integer is calculated an
 ```elixir
 defmodule FactorialServer do
   def server do
+    # Set Label for debugging
+    Process.set_label(__MODULE__)
     # wait for an incoming message
     receive do
       # expect the message to be of format {pid, int}
@@ -107,13 +111,13 @@ end
 <!-- livebook:{"output":true} -->
 
 ```
-Result: 30414093201713378043612608166064768844377641568960512000000000000
+Result: 120
 ```
 
 <!-- livebook:{"output":true} -->
 
 ```
-30414093201713378043612608166064768844377641568960512000000000000
+120
 ```
 
 Due to recursive structure of the server function it can handle multiple requests in order. This allows us to send further requests to the same server.
@@ -135,7 +139,7 @@ Kino.nothing()
 <!-- livebook:{"output":true} -->
 
 ```
-Result: 120
+Result: 6
 ```
 
 ## Trace Process Communication
@@ -194,7 +198,7 @@ Output: 6
 %%{init: {'themeCSS': '.actor:last-of-type:not(:only-of-type) {dominant-baseline: hanging;}'} }%%
 sequenceDiagram
 participant 0 AS self();
-participant 1 AS #35;PID<0.2760.0>;
+participant 1 AS FactorialServer<br/><0.2940.0>;
 0->>1: {:become, &FactorialServer.server/0}
 0->>1: {#35;PID<0.2537.0>, 3}
 1->>0: 6
@@ -238,7 +242,7 @@ Kino.Process.seq_trace(
 <!-- livebook:{"output":true} -->
 
 ```
-Output: 120
+Output: 6
 ```
 
 <!-- livebook:{"output":true} -->
@@ -247,7 +251,7 @@ Output: 120
 %%{init: {'themeCSS': '.actor:last-of-type:not(:only-of-type) {dominant-baseline: hanging;}'} }%%
 sequenceDiagram
 participant 0 AS self();
-participant 1 AS #35;PID<0.2774.0>;
+participant 1 AS FactorialServer<br/><0.2901.0>;
 0->>1: {:become,<br> &FactorialServer.server/0}
 0->>1: {#35;PID<0.2537.0>, 5}
 1->>0: 120
@@ -283,9 +287,9 @@ Kino.Process.seq_trace(
 <!-- livebook:{"output":true} -->
 
 ```
+Output: 24
 Output: 120
 Output: 6
-Output: 24
 ```
 
 <!-- livebook:{"output":true} -->
@@ -294,7 +298,7 @@ Output: 24
 %%{init: {'themeCSS': '.actor:last-of-type:not(:only-of-type) {dominant-baseline: hanging;}'} }%%
 sequenceDiagram
 participant 0 AS self();
-participant 1 AS #35;PID<0.2774.0>;
+participant 1 AS FactorialServer<br/><0.2901.0>;
 0->>1: {#35;PID<0.2537.0>, 3}
 0->>1: {#35;PID<0.2537.0>, 4}
 0->>1: {#35;PID<0.2537.0>, 5}
@@ -328,6 +332,7 @@ Lets see it in action:
 defmodule StateServer do
   # a recursive function with a single argument
   def server(state) do
+    Process.set_label(__MODULE__)
     # instead of doing the recursive call immediately,
     # we wait for an incoming message.
     # each recursive call below leads back to this receive block.
@@ -474,7 +479,7 @@ Current State: 46
 %%{init: {'themeCSS': '.actor:last-of-type:not(:only-of-type) {dominant-baseline: hanging;}'} }%%
 sequenceDiagram
 participant 0 AS self();
-participant 1 AS #35;PID<0.2658.0>;
+participant 1 AS StateServer<br/><0.2915.0>;
 0->>1: {:read, #35;PID<0.2537.0>}
 1->>0: {:ok, 24}
 0->>1: {:write, 23}
