@@ -1,3 +1,5 @@
+<!-- livebook:{"persist_outputs":true} -->
+
 # My favorite Erlang Program by Joe Armstrong in Elixir
 
 ```elixir
@@ -33,6 +35,12 @@ defmodule UniversalServer do
 end
 ```
 
+<!-- livebook:{"output":true} -->
+
+```
+{:module, UniversalServer, <<70, 79, 82, 49, 0, 0, 6, ...>>, ...}
+```
+
 ## Factorial Server
 
 Next we define another module `FactorialServer` with another zero-argument function `server`. This `server` function also uses a `receive` block for waiting for an incoming tuple message.
@@ -55,6 +63,12 @@ defmodule FactorialServer do
   def factorial(0), do: 1
   def factorial(n), do: factorial(n - 1) * n
 end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, FactorialServer, <<70, 79, 82, 49, 0, 0, 8, ...>>, ...}
 ```
 
 ## Spawing the Server
@@ -90,6 +104,12 @@ end
 Kino.nothing()
 ```
 
+<!-- livebook:{"output":true} -->
+
+```
+Result: 30414093201713378043612608166064768844377641568960512000000000000
+```
+
 ## Trace Process Communication
 
 We can use `Kino.Process.render_seq_trace` to plot the process communication in a sequence diagram.
@@ -121,6 +141,25 @@ Kino.Process.seq_trace(
   message_label: &{:ok, inspect(&1) |> String.replace("#", "#35;")}
 )
 |> elem(1)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Output: 120
+```
+
+<!-- livebook:{"output":true} -->
+
+```mermaid
+%%{init: {'themeCSS': '.actor:last-of-type:not(:only-of-type) {dominant-baseline: hanging;}'} }%%
+sequenceDiagram
+participant 0 AS self();
+participant 1 AS #35;PID<0.2643.0>;
+0->>1: {:become, &FactorialServer.server/0}
+0->>1: {#35;PID<0.2537.0>, 5}
+1->>0: 120
+
 ```
 
 Now lets try to widen the scope of the tracing and see what other messages are sent and received.
@@ -155,6 +194,28 @@ Kino.Process.seq_trace(
      |> String.replace("#", "#35;")}
 )
 |> elem(1)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Output: 120
+```
+
+<!-- livebook:{"output":true} -->
+
+```mermaid
+%%{init: {'themeCSS': '.actor:last-of-type:not(:only-of-type) {dominant-baseline: hanging;}'} }%%
+sequenceDiagram
+participant 0 AS self();
+participant 2 AS #35;PID<0.2538.0>;
+participant 1 AS #35;PID<0.2645.0>;
+0->>1: {:become,<br> &FactorialServer.server/0}
+0->>1: {#35;PID<0.2537.0>, 5}
+1->>0: 120
+0->>2: {:io_request, #35;PID<0.2537.0>,<br> #35;Reference<0.3546765160.1109655554.258496>,<br> {:put_chars, :unicode,<br>  "Output: 120\n"}}
+2->>0: {:io_reply,<br> #35;Reference<0.3546765160.1109655554.258496>,<br> :ok}
+
 ```
 
 ## Stateful Server
@@ -202,6 +263,12 @@ defmodule StateServer do
 end
 ```
 
+<!-- livebook:{"output":true} -->
+
+```
+{:module, StateServer, <<70, 79, 82, 49, 0, 0, 7, ...>>, ...}
+```
+
 Now lets spawn the recursive function is separate process.
 
 ```elixir
@@ -246,6 +313,20 @@ receive do
 end
 ```
 
+<!-- livebook:{"output":true} -->
+
+```
+Current State: 24
+Current State: 23
+Current State: 46
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+46
+```
+
 Lets plot the correspondign sequence diagram again:
 
 ```elixir
@@ -286,4 +367,30 @@ Kino.Process.seq_trace(
      |> String.replace("#", "#35;")}
 )
 |> elem(1)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Current State: 24
+Current State: 23
+Current State: 46
+```
+
+<!-- livebook:{"output":true} -->
+
+```mermaid
+%%{init: {'themeCSS': '.actor:last-of-type:not(:only-of-type) {dominant-baseline: hanging;}'} }%%
+sequenceDiagram
+participant 0 AS self();
+participant 1 AS #35;PID<0.2658.0>;
+0->>1: {:read, #35;PID<0.2537.0>}
+1->>0: {:ok, 24}
+0->>1: {:write, 23}
+0->>1: {:read, #35;PID<0.2537.0>}
+1->>0: {:ok, 23}
+0->>1: {:update,<br> #35;Function<42.113135111/1 in :erl_eval.expr/6>}
+0->>1: {:read, #35;PID<0.2537.0>}
+1->>0: {:ok, 46}
+
 ```
