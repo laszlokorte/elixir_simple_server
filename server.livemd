@@ -10,7 +10,7 @@ Mix.install([
 
 In [this blog post](https://joearms.github.io/published/2013-11-21-My-favorite-erlang-program.html) Joe Armstrong walks through a simple example of Erlang code to demonstrate the power and simplicity of Erlang processes.
 
-This Livebook translates the code to Elixir
+This Livebook translates the code to Elixir.
 
 ## Universal Server
 
@@ -83,7 +83,8 @@ send(pid, {self(), 50})
 # receive the result
 receive do
   # print it
-  result -> IO.inspect(result)
+  result ->
+    IO.inspect(result, label: "Result")
 end
 
 Kino.nothing()
@@ -92,37 +93,197 @@ Kino.nothing()
 ## Trace Process Communication
 
 We can use `Kino.Process.render_seq_trace` to plot the process communication in a sequence diagram.
+Observe how the two messages are send to the pid and the result is received.
+
+We limit the scope of the tracing the messages from and to the server process to see only the 3 messages we care about from all the messages traveling through the virtual machine.
 
 ```elixir
-Kino.Process.render_seq_trace(
-  :all,
+server_pid = spawn(&UniversalServer.server/0)
+
+Kino.Process.seq_trace(
+  # trace only messages from and to the server_pid
+  [server_pid],
   fn ->
-    pid = spawn(&UniversalServer.server/0)
     # spawn new process running the UniversalServer
     # send the FactorialServer function to be run inside the other process
-    send(pid, {:become, &FactorialServer.server/0})
+    send(server_pid, {:become, &FactorialServer.server/0})
     # send the number 50 to the server for it to calculate the result 
-    send(pid, {self(), 5})
+    send(server_pid, {self(), 5})
 
     # receive the result
     receive do
       # print it
-      result -> IO.inspect(result)
+      result -> IO.inspect(result, label: "Output")
     end
   end,
-  caption: "Foo",
-  message_label: fn msg ->
-    case msg do
-      e ->
-        {:ok,
-         inspect(e)
-         |> String.replace("#", "#35;")}
+  caption: "Sequence Diagram of messages",
+  # stringify the message and escape hashtag for cleaner output
+  message_label: &{:ok, inspect(&1) |> String.replace("#", "#35;")}
+)
+|> elem(1)
+```
 
-      _ ->
-        :continue
+Now lets try to widen the scope of the tracing and see what other messages are sent and received.
+
+Notice that now there are three processes visible. The third process is the one responsible for handling IO. when calling `IO.inspect` for printing the result value the string to be printed is sent as message to this process and a confirmation is sent back.
+
+```elixir
+server_pid = spawn(&UniversalServer.server/0)
+
+Kino.Process.seq_trace(
+  # trace all messages
+  :all,
+  fn ->
+    # spawn new process running the UniversalServer
+    # send the FactorialServer function to be run inside the other process
+    send(server_pid, {:become, &FactorialServer.server/0})
+    # send the number 50 to the server for it to calculate the result 
+    send(server_pid, {self(), 5})
+
+    # receive the result
+    receive do
+      # print it
+      result -> IO.inspect(result, label: "Output")
+    end
+  end,
+  caption: "Sequence Diagram of messages",
+  # stringify the message and escape hashtag for cleaner output
+  message_label:
+    &{:ok,
+     inspect(&1, pretty: true, width: 30)
+     |> String.replace("\n", "<br>")
+     |> String.replace("#", "#35;")}
+)
+|> elem(1)
+```
+
+## Stateful Server
+
+Next lets take a look at how processes can be used to store state and provide an interface to read and manipulate same state.
+
+This is how all state in all Erlang and Elixir application is handled at its core. Everything else is just abstraction built around it.
+
+The core idea is to keep some value stored in a local variable alive by passing it as parameter through an recursive function without a base case, effectively an infinite recursion that never halts.
+This allows the value to be modified - or rather the argument to be replaced - at each recursive step.
+
+But this alone would just lead to an infinite recursive calculation that never halts but is useless.
+
+The next important idea is to inject a `receive` block into the recursive function to wait for incoming messages from other processes. This slows down the calculation by doing only one recursion-step for each received message, forcing the function to idle inbetween. Additionally it allows the recursive function to adjust the recursion step based on the incoming message.
+
+Lets see it in action:
+
+```elixir
+defmodule StateServer do
+  # a recursive function with a single argument
+  def server(state) do
+    # instead of doing the recursive call immediately,
+    # we wait for an incoming message.
+    # each recursive call below leads back to this receive block.
+    receive do
+      # if the received message is {:write, ...}
+      {:write, new_state} ->
+        # recursive call with new state value
+        server(new_state)
+
+      # if the message is {:update, ...} and a single-argument function is provided
+      {:update, func} when is_function(func, 1) ->
+        # pass the current state the to function 
+        # and pass the resulting value to the recursive call
+        server(func.(state))
+
+      # if the message is :read and a process id is provided
+      {:read, from} when is_pid(from) ->
+        # send the current state to the process id
+        send(from, {:ok, state})
+        # recursive call to keep old state alive
+        server(state)
     end
   end
-)
+end
+```
 
-Kino.nothing()
+Now lets spawn the recursive function is separate process.
+
+```elixir
+# spawn the function as processes, providing 24 as initial argument
+# and capture the process id into a variable
+state_server_pid = spawn(StateServer, :server, [24])
+
+# the function/process will immediatly idle waiting for an incoming message
+
+# send the :read message to the process
+send(state_server_pid, {:read, self()})
+
+# we expect the process to reply with the current value
+receive do
+  # we receive the value (expect it to be 24) and print it
+  {:ok, value} -> IO.inspect(value, label: "Current State")
+end
+
+# send the next message to the process.
+# this will alter the recursion step in the process to pass 23 as new argument
+send(state_server_pid, {:write, 23})
+
+# send :read again
+send(state_server_pid, {:read, self()})
+
+# and receive the response
+receive do
+  # now we expect value to be 23
+  {:ok, value} -> IO.inspect(value, label: "Current State")
+end
+
+# send :update and a lambda function to modify the current value
+send(state_server_pid, {:update, fn old -> old * 2 end})
+
+# send :read to query for the new value
+send(state_server_pid, {:read, self()})
+
+# receive the response
+receive do
+  # expected to be 23*2 = 46
+  {:ok, value} -> IO.inspect(value, label: "Current State")
+end
+```
+
+Lets plot the correspondign sequence diagram again:
+
+```elixir
+state_server_pid = spawn(StateServer, :server, [24])
+
+Kino.Process.seq_trace(
+  # trace only the messages from and to the server
+  [state_server_pid],
+  fn ->
+    send(state_server_pid, {:read, self()})
+
+    receive do
+      {:ok, value} -> IO.inspect(value, label: "Current State")
+    end
+
+    send(state_server_pid, {:write, 23})
+
+    send(state_server_pid, {:read, self()})
+
+    receive do
+      {:ok, value} -> IO.inspect(value, label: "Current State")
+    end
+
+    send(state_server_pid, {:update, fn old -> old * 2 end})
+
+    send(state_server_pid, {:read, self()})
+
+    receive do
+      {:ok, value} -> IO.inspect(value, label: "Current State")
+    end
+  end,
+  caption: "Sequence Diagram of messages",
+  # stringify the message and escape hashtag for cleaner output
+  message_label:
+    &{:ok,
+     inspect(&1, pretty: true, width: 30)
+     |> String.replace("\n", "<br>")
+     |> String.replace("#", "#35;")}
+)
+|> elem(1)
 ```
