@@ -57,6 +57,8 @@ defmodule FactorialServer do
       {from, n} when is_pid(from) and is_integer(n) ->
         # calculate factorial and send the result back to the from-adress
         send(from, factorial(n))
+        # recursive call to wait for the next message
+        server()
     end
   end
 
@@ -100,6 +102,32 @@ receive do
   result ->
     IO.inspect(result, label: "Result")
 end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Result: 30414093201713378043612608166064768844377641568960512000000000000
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+30414093201713378043612608166064768844377641568960512000000000000
+```
+
+Due to recursive structure of the server function it can handle multiple requests in order. This allows us to send further requests to the same server.
+
+```elixir
+# send another number to the same server
+send(pid, {self(), 5})
+
+# receive the result again
+receive do
+  # print it
+  result ->
+    IO.inspect(result, label: "Result")
+end
 
 Kino.nothing()
 ```
@@ -107,7 +135,7 @@ Kino.nothing()
 <!-- livebook:{"output":true} -->
 
 ```
-Result: 30414093201713378043612608166064768844377641568960512000000000000
+Result: 120
 ```
 
 ## Trace Process Communication
@@ -128,12 +156,22 @@ Kino.Process.seq_trace(
     # send the FactorialServer function to be run inside the other process
     send(server_pid, {:become, &FactorialServer.server/0})
     # send the number 50 to the server for it to calculate the result 
-    send(server_pid, {self(), 5})
+    send(server_pid, {self(), 3})
 
     # receive the result
     receive do
       # print it
       result -> IO.inspect(result, label: "Output")
+    end
+
+    # send another number to the server
+    send(server_pid, {self(), 5})
+
+    # receive the result again
+    receive do
+      # print it
+      result ->
+        IO.inspect(result, label: "Output")
     end
   end,
   caption: "Sequence Diagram of messages",
@@ -147,6 +185,7 @@ Kino.Process.seq_trace(
 
 ```
 Output: 120
+Output: 6
 ```
 
 <!-- livebook:{"output":true} -->
@@ -155,10 +194,10 @@ Output: 120
 %%{init: {'themeCSS': '.actor:last-of-type:not(:only-of-type) {dominant-baseline: hanging;}'} }%%
 sequenceDiagram
 participant 0 AS self();
-participant 1 AS #35;PID<0.2643.0>;
+participant 1 AS #35;PID<0.2760.0>;
 0->>1: {:become, &FactorialServer.server/0}
-0->>1: {#35;PID<0.2537.0>, 5}
-1->>0: 120
+0->>1: {#35;PID<0.2537.0>, 3}
+1->>0: 6
 
 ```
 
@@ -208,28 +247,80 @@ Output: 120
 %%{init: {'themeCSS': '.actor:last-of-type:not(:only-of-type) {dominant-baseline: hanging;}'} }%%
 sequenceDiagram
 participant 0 AS self();
-participant 2 AS #35;PID<0.2538.0>;
-participant 1 AS #35;PID<0.2645.0>;
+participant 1 AS #35;PID<0.2774.0>;
 0->>1: {:become,<br> &FactorialServer.server/0}
 0->>1: {#35;PID<0.2537.0>, 5}
 1->>0: 120
-0->>2: {:io_request, #35;PID<0.2537.0>,<br> #35;Reference<0.3546765160.1109655554.258496>,<br> {:put_chars, :unicode,<br>  "Output: 120\n"}}
-2->>0: {:io_reply,<br> #35;Reference<0.3546765160.1109655554.258496>,<br> :ok}
+
+```
+
+## Multiple messages
+
+We can also send multiple requests one after another before processing the results:
+
+```elixir
+Kino.Process.seq_trace(
+  # trace only messages from and to the server_pid
+  [server_pid],
+  fn ->
+    # send 3 requests
+    send(server_pid, {self(), 3})
+    send(server_pid, {self(), 4})
+    send(server_pid, {self(), 5})
+
+    # receive 3 results
+    receive do: (result -> IO.inspect(result, label: "Output"))
+    receive do: (result -> IO.inspect(result, label: "Output"))
+    receive do: (result -> IO.inspect(result, label: "Output"))
+  end,
+  caption: "Sequence Diagram of messages",
+  # stringify the message and escape hashtag for cleaner output
+  message_label: &{:ok, inspect(&1) |> String.replace("#", "#35;")}
+)
+|> elem(1)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Output: 120
+Output: 6
+Output: 24
+```
+
+<!-- livebook:{"output":true} -->
+
+```mermaid
+%%{init: {'themeCSS': '.actor:last-of-type:not(:only-of-type) {dominant-baseline: hanging;}'} }%%
+sequenceDiagram
+participant 0 AS self();
+participant 1 AS #35;PID<0.2774.0>;
+0->>1: {#35;PID<0.2537.0>, 3}
+0->>1: {#35;PID<0.2537.0>, 4}
+0->>1: {#35;PID<0.2537.0>, 5}
+1->>0: 6
+1->>0: 24
+1->>0: 120
 
 ```
 
 ## Stateful Server
 
-Next lets take a look at how processes can be used to store state and provide an interface to read and manipulate same state.
+Being functional languages with immutable data structures it seems impossible for Erlang and Elixir to do any stateful computation.
 
-This is how all state in all Erlang and Elixir application is handled at its core. Everything else is just abstraction built around it.
+Lets take a look at how processes can be used to store state and provide an interface to read and manipulate some state.
 
-The core idea is to keep some value stored in a local variable alive by passing it as parameter through an recursive function without a base case, effectively an infinite recursion that never halts.
+This is how all state in all Erlang and Elixir application is managed at its core. Everything else is just abstraction built around it.
+
+The core idea is to keep some value stored in a local variable alive by passing it as parameter through an recursive function without a base case, causing effectively an infinite recursion that never halts.
 This allows the value to be modified - or rather the argument to be replaced - at each recursive step.
 
-But this alone would just lead to an infinite recursive calculation that never halts but is useless.
+But this alone would just lead to an infinite recursive calculation that never halts but would be useless.
 
-The next important idea is to inject a `receive` block into the recursive function to wait for incoming messages from other processes. This slows down the calculation by doing only one recursion-step for each received message, forcing the function to idle inbetween. Additionally it allows the recursive function to adjust the recursion step based on the incoming message.
+The next important piece in the puzzle is to inject a `receive` block into the recursive function to wait for incoming messages from other processes. This slows down the calculation by doing only one recursion-step for each received message, forcing the function to idle in-between. 
+Additionally it allows the recursive function to adjust the exact recursion step based on the incoming message from the outside.
+
+The primary difference to our `FactorialServer` above is that the server function will now expect one instead of no arguments.
 
 Lets see it in action:
 
